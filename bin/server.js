@@ -145,6 +145,15 @@ const onconnection = conn => {
 wss.on('connection', onconnection);
 
 server.on('upgrade', async (request, socket, head) => {
+  // Allow connections only from the app domain
+  // cookie is not available in the request headers from app.gomarketplan to the websocket server
+  if (request?.headers?.origin === "https://app.gomarketplan.io") {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+    return;
+  }
+
   // Extract token from WebSocket cookie
   const cookieString = request?.headers?.cookie ?? '';
   let token;
