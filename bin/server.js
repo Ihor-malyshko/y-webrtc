@@ -54,7 +54,9 @@ const authenticateToken = async (token) => {
     );
     return response.data.user_id; // Expecting Laravel to return user_id
   } catch (error) {
-    console.error('Token authentication failed:', error.response?.data || error.message);
+    console.error('Token authentication failed:', 
+      // error.response?.data || error.message
+    );
     return null;
   }
 };
@@ -143,8 +145,21 @@ const onconnection = conn => {
 wss.on('connection', onconnection);
 
 server.on('upgrade', async (request, socket, head) => {
-  // Extract token from WebSocket headers
-  const token = request.headers['sec-websocket-protocol'];
+  // Extract token from WebSocket cookie
+  const cookieString = request?.headers?.cookie ?? '';
+  let token;
+
+  if (cookieString) {
+    // Parse cookies string to find token
+    const cookies = cookieString.split(';').reduce((cookiesObj, cookie) => {
+      const [key, value] = cookie.trim().split('=');
+      cookiesObj[key] = value;
+      return cookiesObj;
+    }, {});
+
+    // Get token from parsed cookies
+    token = cookies['teamAccessToken'];
+  }
 
   if (!token) {
     console.error('Unauthorized connection: No token');
