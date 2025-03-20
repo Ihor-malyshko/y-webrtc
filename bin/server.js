@@ -3,6 +3,7 @@
 import { WebSocketServer } from 'ws'
 import http from 'http'
 import * as map from 'lib0/map'
+import axios from 'axios' // Added axios for Laravel auth
 
 const wsReadyStateConnecting = 0
 const wsReadyStateOpen = 1
@@ -13,6 +14,9 @@ const pingTimeout = 30000
 
 const port = process.env.PORT || 4444
 const wss = new WebSocketServer({ noServer: true })
+
+// const LARAVEL_AUTH_URL = 'http://webserver/api/verify-token' // for the local env
+const LARAVEL_AUTH_URL = 'https://gomarketplan.io/api/verify-token';
 
 const server = http.createServer((request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/plain' })
@@ -39,6 +43,23 @@ const send = (conn, message) => {
     conn.close()
   }
 }
+
+// Function to authenticate token with Laravel
+const authenticateToken = async (token) => {
+  try {
+    const response = await axios.post(
+      LARAVEL_AUTH_URL,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return response.data.user_id; // Expecting Laravel to return user_id
+  } catch (error) {
+    console.error('Token authentication failed:', 
+      // error.response?.data || error.message
+    );
+    return null;
+  }
+};
 
 /**
  * Setup a new client
@@ -121,19 +142,45 @@ const onconnection = conn => {
     }
   })
 }
-wss.on('connection', onconnection)
+wss.on('connection', onconnection);
 
-server.on('upgrade', (request, socket, head) => {
-  // You may check auth of request here..
-  /**
-   * @param {any} ws
-   */
-  const handleAuth = ws => {
-    wss.emit('connection', ws, request)
+server.on('upgrade', async (request, socket, head) => {
+  // Extract token from WebSocket cookie
+  const cookieString = request?.headers?.cookie ?? '';
+  let token;
+
+  if (cookieString) {
+    // Parse cookies string to find token
+    const cookies = cookieString.split(';').reduce((cookiesObj, cookie) => {
+      const [key, value] = cookie.trim().split('=');
+      cookiesObj[key] = value;
+      return cookiesObj;
+    }, {});
+
+    // Get token from parsed cookies
+    token = cookies['teamAccessToken'];
   }
-  wss.handleUpgrade(request, socket, head, handleAuth)
-})
+
+  if (!token) {
+    console.error('Unauthorized connection: No token');
+    socket.destroy();
+    return;
+  }
+
+  const userId = await authenticateToken(token);
+
+  if (!userId) {
+    console.error('Unauthorized connection: Invalid token');
+    socket.destroy();
+    return;
+  }
+
+  console.log(`Authenticated user: ${userId}`);
+
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    ws.userId = userId; // Store userId in WebSocket instance
+    wss.emit('connection', ws, request);
+  });
+});
 
 server.listen(port)
-
-console.log('Signaling server running on localhost:', port)
